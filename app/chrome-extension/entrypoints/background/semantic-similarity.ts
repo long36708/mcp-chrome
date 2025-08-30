@@ -143,12 +143,31 @@ export async function handleModelSwitch(
   modelVersion: 'full' | 'quantized' | 'compressed' = 'quantized',
   modelDimension?: number,
   previousDimension?: number,
+  useLocalModel?: boolean,
+  localModelPath?: string,
+  localModelIdentifier?: string,
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const needsSwitch = needsModelSwitch(modelPreset, modelVersion, modelDimension);
-    if (!needsSwitch) {
-      await updateModelStatus('ready', 100);
-      return { success: true };
+    // Check if we're switching to a local model
+    const isSwitchingToLocalModel = useLocalModel && localModelPath;
+
+    // For local models, we need to check if the path has changed
+    if (isSwitchingToLocalModel) {
+      const needsSwitch =
+        !currentBackgroundModelConfig ||
+        currentBackgroundModelConfig.modelPreset !== 'local-model' ||
+        (currentBackgroundModelConfig as any).localModelPath !== localModelPath;
+
+      if (!needsSwitch) {
+        await updateModelStatus('ready', 100);
+        return { success: true };
+      }
+    } else {
+      const needsSwitch = needsModelSwitch(modelPreset, modelVersion, modelDimension);
+      if (!needsSwitch) {
+        await updateModelStatus('ready', 100);
+        return { success: true };
+      }
     }
 
     await updateModelStatus('downloading', 0);
@@ -162,28 +181,53 @@ export async function handleModelSwitch(
       return { success: false, error: errorMessage };
     }
 
+    const config: any = {
+      useLocalFiles: isSwitchingToLocalModel || false,
+      forceOffscreen: true,
+    };
+
+    if (isSwitchingToLocalModel) {
+      // Configure for local model
+      config.modelPreset = 'local-model';
+      config.localModelPath = localModelPath;
+      config.modelIdentifier = localModelIdentifier || 'local-model';
+      config.modelDimension = modelDimension || 384;
+      // For local models, we don't use modelVersion in the same way
+    } else {
+      // Configure for predefined model
+      config.modelPreset = modelPreset;
+      config.modelVersion = modelVersion;
+      config.modelDimension = modelDimension;
+    }
+
     const response = await chrome.runtime.sendMessage({
       target: 'offscreen',
       type: OFFSCREEN_MESSAGE_TYPES.SIMILARITY_ENGINE_INIT,
-      config: {
-        useLocalFiles: false,
-        modelPreset: modelPreset,
-        modelVersion: modelVersion,
-        modelDimension: modelDimension,
-        forceOffscreen: true,
-      },
+      config,
     });
 
     if (response && response.success) {
       currentBackgroundModelConfig = {
-        modelPreset: modelPreset,
-        modelVersion: modelVersion,
-        modelDimension: modelDimension!,
-      };
+        modelPreset: isSwitchingToLocalModel ? 'local-model' : modelPreset,
+        modelVersion: isSwitchingToLocalModel ? 'local' : modelVersion,
+        modelDimension: modelDimension || (isSwitchingToLocalModel ? 384 : 0),
+        // Add local model specific properties
+        ...(isSwitchingToLocalModel
+          ? {
+              localModelPath: localModelPath,
+              modelIdentifier: localModelIdentifier || 'local-model',
+            }
+          : {}),
+      } as any;
 
       // Only reinitialize ContentIndexer when dimension changes
       try {
-        if (modelDimension && previousDimension && modelDimension !== previousDimension) {
+        const shouldReinitializeIndexer =
+          (modelDimension && previousDimension && modelDimension !== previousDimension) ||
+          (isSwitchingToLocalModel && previousDimension !== (modelDimension || 384)) ||
+          (!isSwitchingToLocalModel && currentBackgroundModelConfig?.modelPreset === 'local-model');
+
+        if (shouldReinitializeIndexer) {
           const { getGlobalContentIndexer } = await import('@/utils/content-indexer');
           const contentIndexer = getGlobalContentIndexer();
           await contentIndexer.reinitialize();
@@ -344,14 +388,29 @@ function analyzeErrorType(errorMessage: string): 'network' | 'file' | 'unknown' 
 export const initSemanticSimilarityListener = () => {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === BACKGROUND_MESSAGE_TYPES.SWITCH_SEMANTIC_MODEL) {
-      handleModelSwitch(
-        message.modelPreset,
-        message.modelVersion,
-        message.modelDimension,
-        message.previousDimension,
-      )
-        .then((result: { success: boolean; error?: string }) => sendResponse(result))
-        .catch((error: any) => sendResponse({ success: false, error: error.message }));
+      // Check if this is a local model switch request
+      if (message.useLocalModel) {
+        handleModelSwitch(
+          'local-model', // modelPreset
+          'local', // modelVersion
+          message.modelDimension,
+          message.previousDimension,
+          true, // useLocalModel
+          message.modelPath, // localModelPath
+          message.modelIdentifier, // localModelIdentifier
+        )
+          .then((result: { success: boolean; error?: string }) => sendResponse(result))
+          .catch((error: any) => sendResponse({ success: false, error: error.message }));
+      } else {
+        handleModelSwitch(
+          message.modelPreset,
+          message.modelVersion,
+          message.modelDimension,
+          message.previousDimension,
+        )
+          .then((result: { success: boolean; error?: string }) => sendResponse(result))
+          .catch((error: any) => sendResponse({ success: false, error: error.message }));
+      }
       return true;
     } else if (message.type === BACKGROUND_MESSAGE_TYPES.GET_MODEL_STATUS) {
       handleGetModelStatus()

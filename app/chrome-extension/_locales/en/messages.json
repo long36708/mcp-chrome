@@ -442,5 +442,41 @@
   "pagesUnit": {
     "message": "pages",
     "description": "Pages count unit"
+  },
+  "localModelLabel": {
+    "message": "Local Model",
+    "description": "Local model option label"
+  },
+  "localModelDescription": {
+    "message": "Use a custom local model file",
+    "description": "Description for local model option"
+  },
+  "selectModelFileLabel": {
+    "message": "Select Model File",
+    "description": "Label for model file selection"
+  },
+  "modelPathPlaceholder": {
+    "message": "Path to your ONNX model file",
+    "description": "Placeholder for model file path input"
+  },
+  "browseButton": {
+    "message": "Browse",
+    "description": "Browse for file button text"
+  },
+  "localModelHint": {
+    "message": "Select an ONNX format model file (.onnx)",
+    "description": "Hint for local model file selection"
+  },
+  "modelDimensionLabel": {
+    "message": "Model Dimension",
+    "description": "Label for model dimension input"
+  },
+  "modelIdentifierLabel": {
+    "message": "Model Identifier",
+    "description": "Label for model identifier input"
+  },
+  "applyLocalModelButton": {
+    "message": "Apply Local Model",
+    "description": "Apply local model button text"
   }
 }

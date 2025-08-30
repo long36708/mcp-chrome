@@ -205,6 +205,17 @@ const similarities = await simdMath.batchSimilarity(vectors, query, dimension);
 const matrix = await simdMath.similarityMatrix(vectorsA, vectorsB, dimension);
 ```
 
+#### 模型管理
+
+语义相似度引擎支持多种预训练模型，包括 `multilingual-e5-base` 模型。这些模型在首次使用时从 Hugging Face 模型库下载：
+
+- **模型来源**：模型从 Hugging Face 下载（例如 `https://huggingface.co/Xenova/multilingual-e5-base`）
+- **缓存策略**：下载的模型缓存在浏览器的 Cache API 中供后续使用
+- **缓存过期**：缓存的模型在 30 天后过期，并自动清理
+- **缓存大小限制**：总缓存大小限制为 500MB，必要时自动清理较旧的条目
+
+这种方法确保了模型只在必要时下载，同时通过缓存提供快速的后续访问。
+
 ### 向量数据库 (hnswlib-wasm)
 
 **特性**：

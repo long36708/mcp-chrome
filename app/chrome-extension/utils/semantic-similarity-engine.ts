@@ -353,6 +353,7 @@ export function getAllModelSizes() {
 interface ModelConfig {
   modelIdentifier: string;
   localModelPathPrefix?: string; // Base path for local models (relative to public)
+  localModelPath?: string; // User-specified local model path
   onnxModelFile?: string; // ONNX model filename
   maxLength?: number;
   cacheSize?: number;
@@ -362,9 +363,9 @@ interface ModelConfig {
   workerPath?: string; // Worker script path (relative to extension root)
   concurrentLimit?: number; // Worker task concurrency limit
   forceOffscreen?: boolean; // Force offscreen mode (for testing)
-  modelPreset?: ModelPreset; // Predefined model selection
+  modelPreset?: ModelPreset | 'local-model'; // Predefined model selection or local model
   dimension?: number; // Vector dimension (auto-obtained from preset model)
-  modelVersion?: 'full' | 'quantized' | 'compressed'; // Model version selection
+  modelVersion?: 'full' | 'quantized' | 'compressed' | 'local'; // Model version selection
   requiresTokenTypeIds?: boolean; // Whether model requires token_type_ids input
 }
 
@@ -904,6 +905,7 @@ export class SemanticSimilarityEngine {
       ...modelConfig,
       modelIdentifier: modelConfig.modelIdentifier || 'Xenova/bge-small-en-v1.5',
       localModelPathPrefix: modelConfig.localModelPathPrefix || 'models/',
+      localModelPath: modelConfig.localModelPath, // User-specified local model path
       onnxModelFile: modelConfig.onnxModelFile || 'model.onnx',
       maxLength: modelConfig.maxLength || 256,
       cacheSize: modelConfig.cacheSize || 500,
@@ -1345,13 +1347,25 @@ export class SemanticSimilarityEngine {
         console.log('SemanticSimilarityEngine: Tokenizer loaded.');
 
         if (this.config.useLocalFiles) {
-          // Local files mode - use URL path as before
-          const onnxModelPathForWorker = chrome.runtime.getURL(
-            `models/${this.config.modelIdentifier}/${this.config.onnxModelFile}`,
-          );
-          console.log(
-            `SemanticSimilarityEngine: Instructing worker to load local ONNX model from ${onnxModelPathForWorker}`,
-          );
+          // Local files mode - check if it's a user-specified local model
+          let onnxModelPathForWorker: string;
+
+          if (this.config.localModelPath) {
+            // Use user-specified local model path
+            onnxModelPathForWorker = this.config.localModelPath;
+            console.log(
+              `SemanticSimilarityEngine: Instructing worker to load user-specified local ONNX model from ${onnxModelPathForWorker}`,
+            );
+          } else {
+            // Use default local model path
+            onnxModelPathForWorker = chrome.runtime.getURL(
+              `models/${this.config.modelIdentifier}/${this.config.onnxModelFile}`,
+            );
+            console.log(
+              `SemanticSimilarityEngine: Instructing worker to load default local ONNX model from ${onnxModelPathForWorker}`,
+            );
+          }
+
           await this._sendMessageToWorker('init', {
             modelPath: onnxModelPathForWorker,
             numThreads: this.config.numThreads,
@@ -1516,14 +1530,26 @@ export class SemanticSimilarityEngine {
     console.log('SemanticSimilarityEngine: Tokenizer loaded.');
 
     if (this.config.useLocalFiles) {
-      // Local files mode - use URL path as before
-      const onnxModelPathForWorker = chrome.runtime.getURL(
-        `models/${this.config.modelIdentifier}/${this.config.onnxModelFile}`,
-      );
+      // Local files mode - check if it's a user-specified local model
+      let onnxModelPathForWorker: string;
+
+      if (this.config.localModelPath) {
+        // Use user-specified local model path
+        onnxModelPathForWorker = this.config.localModelPath;
+        console.log(
+          `SemanticSimilarityEngine: Instructing worker to load user-specified local ONNX model from ${onnxModelPathForWorker}`,
+        );
+      } else {
+        // Use default local model path
+        onnxModelPathForWorker = chrome.runtime.getURL(
+          `models/${this.config.modelIdentifier}/${this.config.onnxModelFile}`,
+        );
+        console.log(
+          `SemanticSimilarityEngine: Instructing worker to load default local ONNX model from ${onnxModelPathForWorker}`,
+        );
+      }
+
       reportProgress('downloading', 80, 'Loading local ONNX model...');
-      console.log(
-        `SemanticSimilarityEngine: Instructing worker to load local ONNX model from ${onnxModelPathForWorker}`,
-      );
       await this._sendMessageToWorker('init', {
         modelPath: onnxModelPathForWorker,
         numThreads: this.config.numThreads,

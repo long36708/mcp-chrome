@@ -206,6 +206,17 @@ const similarities = await simdMath.batchSimilarity(vectors, query, dimension);
 const matrix = await simdMath.similarityMatrix(vectorsA, vectorsB, dimension);
 ```
 
+#### Model Management
+
+The Semantic Similarity Engine supports multiple pre-trained models, including the `multilingual-e5-base` model. These models are downloaded from the Hugging Face model hub when first used:
+
+- **Model Source**: Models are downloaded from Hugging Face (e.g., `https://huggingface.co/Xenova/multilingual-e5-base`)
+- **Caching Strategy**: Downloaded models are cached in the browser's Cache API for subsequent use
+- **Cache Expiry**: Cached models expire after 30 days and are automatically cleaned up
+- **Cache Size Limit**: Total cache size is limited to 500MB, with automatic cleanup of older entries when needed
+
+This approach ensures that models are only downloaded when necessary while providing fast subsequent access through caching.
+
 ### Vector Database (hnswlib-wasm)
 
 **Features**:

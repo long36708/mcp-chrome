@@ -127,6 +127,77 @@
           </button>
         </div>
 
+        <!-- Local Model Option -->
+        <div
+          class="model-card"
+          :class="{ selected: useLocalModel, disabled: isModelSwitching || isModelDownloading }"
+          @click="toggleLocalModel"
+        >
+          <div class="model-header">
+            <div class="model-info">
+              <p class="model-name" :class="{ 'selected-text': useLocalModel }">
+                {{ getMessage('localModelLabel') }}
+              </p>
+              <p class="model-description">{{ getMessage('localModelDescription') }}</p>
+            </div>
+            <div v-if="useLocalModel" class="check-icon">
+              <CheckIcon class="text-white" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Local Model File Selection -->
+        <div v-if="useLocalModel" class="local-model-section">
+          <div class="file-selection">
+            <label class="file-label">{{ getMessage('selectModelFileLabel') }}</label>
+            <div class="file-input-container">
+              <input
+                type="text"
+                :value="localModelPath"
+                @input="updateLocalModelPath"
+                class="file-input"
+                :placeholder="getMessage('modelPathPlaceholder')"
+              />
+              <button class="browse-button" @click="browseForModel">
+                {{ getMessage('browseButton') }}
+              </button>
+            </div>
+            <p class="file-hint">{{ getMessage('localModelHint') }}</p>
+          </div>
+
+          <div class="model-config">
+            <div class="config-row">
+              <label class="config-label">{{ getMessage('modelDimensionLabel') }}</label>
+              <input
+                type="number"
+                :value="localModelDimension"
+                @input="updateLocalModelDimension"
+                class="config-input"
+                min="1"
+              />
+            </div>
+
+            <div class="config-row">
+              <label class="config-label">{{ getMessage('modelIdentifierLabel') }}</label>
+              <input
+                type="text"
+                :value="localModelIdentifier"
+                @input="updateLocalModelIdentifier"
+                class="config-input"
+              />
+            </div>
+          </div>
+
+          <button
+            class="apply-local-model-button"
+            :disabled="!localModelPath || isModelSwitching || isModelDownloading"
+            @click="applyLocalModel"
+          >
+            {{ getMessage('applyLocalModelButton') }}
+          </button>
+        </div>
+
+        <!-- Predefined Models -->
         <div class="model-list">
           <div
             v-for="model in availableModels"
@@ -134,22 +205,28 @@
             :class="[
               'model-card',
               {
-                selected: currentModel === model.preset,
-                disabled: isModelSwitching || isModelDownloading,
+                selected: currentModel === model.preset && !useLocalModel,
+                disabled: isModelSwitching || isModelDownloading || useLocalModel,
               },
             ]"
             @click="
-              !isModelSwitching && !isModelDownloading && switchModel(model.preset as ModelPreset)
+              !isModelSwitching &&
+              !isModelDownloading &&
+              !useLocalModel &&
+              switchModel(model.preset as ModelPreset)
             "
           >
             <div class="model-header">
               <div class="model-info">
-                <p class="model-name" :class="{ 'selected-text': currentModel === model.preset }">
+                <p
+                  class="model-name"
+                  :class="{ 'selected-text': currentModel === model.preset && !useLocalModel }"
+                >
                   {{ model.preset }}
                 </p>
                 <p class="model-description">{{ getModelDescription(model) }}</p>
               </div>
-              <div v-if="currentModel === model.preset" class="check-icon">
+              <div v-if="currentModel === model.preset && !useLocalModel" class="check-icon">
                 <CheckIcon class="text-white" />
               </div>
             </div>
@@ -218,7 +295,9 @@
           @click="showClearConfirmation = true"
         >
           <TrashIcon />
-          <span>{{ isClearingData ? getMessage('clearingStatus') : getMessage('clearAllDataButton') }}</span>
+          <span>{{
+            isClearingData ? getMessage('clearingStatus') : getMessage('clearAllDataButton')
+          }}</span>
         </button>
       </div>
 
@@ -328,6 +407,12 @@ const modelErrorType = ref<'network' | 'file' | 'unknown' | ''>('');
 
 const selectedVersion = ref<'quantized'>('quantized');
 
+// Local model settings
+const useLocalModel = ref(false);
+const localModelPath = ref('');
+const localModelDimension = ref(384);
+const localModelIdentifier = ref('local-model');
+
 const storageStats = ref<{
   indexedPages: number;
   totalDocuments: number;
@@ -385,7 +470,9 @@ const getStatusClass = () => {
 const getStatusText = () => {
   if (nativeConnectionStatus.value === 'connected') {
     if (serverStatus.value.isRunning) {
-      return getMessage('serviceRunningStatus', [(serverStatus.value.port || 'Unknown').toString()]);
+      return getMessage('serviceRunningStatus', [
+        (serverStatus.value.port || 'Unknown').toString(),
+      ]);
     } else {
       return getMessage('connectedServiceNotStartedStatus');
     }
@@ -777,7 +864,17 @@ const loadModelPreference = async () => {
       'selectedVersion',
       'modelState',
       'semanticEngineState',
+      'useLocalModel',
+      'localModelPath',
+      'localModelDimension',
+      'localModelIdentifier',
     ]);
+
+    // Load local model settings
+    useLocalModel.value = result.useLocalModel || false;
+    localModelPath.value = result.localModelPath || '';
+    localModelDimension.value = result.localModelDimension || 384;
+    localModelIdentifier.value = result.localModelIdentifier || 'local-model';
 
     if (result.selectedModel) {
       const storedModel = result.selectedModel as string;
@@ -858,6 +955,151 @@ const saveVersionPreference = async (version: 'full' | 'quantized' | 'compressed
     await chrome.storage.local.set({ selectedVersion: version });
   } catch (error) {
     console.error('保存版本偏好失败:', error);
+  }
+};
+
+// Local model methods
+const toggleLocalModel = () => {
+  if (isModelSwitching.value || isModelDownloading.value) return;
+
+  useLocalModel.value = !useLocalModel.value;
+  saveLocalModelPreference();
+};
+
+const updateLocalModelPath = (event: Event) => {
+  const target = event.target as HTMLInputElement;
+  localModelPath.value = target.value;
+};
+
+const updateLocalModelDimension = (event: Event) => {
+  const target = event.target as HTMLInputElement;
+  localModelDimension.value = parseInt(target.value) || 384;
+};
+
+const updateLocalModelIdentifier = (event: Event) => {
+  const target = event.target as HTMLInputElement;
+  localModelIdentifier.value = target.value || 'local-model';
+};
+
+const browseForModel = async () => {
+  try {
+    // eslint-disable-next-line no-undef
+    const [fileHandle] = await window.showOpenFilePicker({
+      types: [
+        {
+          description: 'ONNX Model Files',
+          accept: {
+            'application/octet-stream': ['.onnx'],
+          },
+        },
+      ],
+      multiple: false,
+    });
+
+    const file = await fileHandle.getFile();
+    // In a Chrome extension, we can't directly access the file path
+    // We'll need to store the file handle or read the file content
+    // For now, we'll just show the file name as a placeholder
+    localModelPath.value = file.name;
+  } catch (error) {
+    console.error('选择模型文件失败:', error);
+  }
+};
+
+const applyLocalModel = async () => {
+  if (!localModelPath.value || isModelSwitching.value || isModelDownloading.value) return;
+
+  console.log('应用本地模型设置:', {
+    path: localModelPath.value,
+    dimension: localModelDimension.value,
+    identifier: localModelIdentifier.value,
+  });
+
+  // Save local model settings
+  await saveLocalModelPreference();
+
+  // Switch to local model
+  isModelSwitching.value = true;
+  modelSwitchProgress.value = getMessage('switchingModelStatus');
+  modelInitializationStatus.value = 'downloading';
+  modelDownloadProgress.value = 0;
+  isModelDownloading.value = true;
+
+  try {
+    startModelStatusMonitoring();
+
+    // Send message to background to switch to local model
+    // eslint-disable-next-line no-undef
+    const response = await chrome.runtime.sendMessage({
+      type: 'switch_semantic_model',
+      useLocalModel: true,
+      modelPath: localModelPath.value,
+      modelDimension: localModelDimension.value,
+      modelIdentifier: localModelIdentifier.value,
+    });
+
+    if (response && response.success) {
+      modelSwitchProgress.value = getMessage('successNotification');
+      console.log('本地模型应用成功');
+
+      modelInitializationStatus.value = 'ready';
+      isModelDownloading.value = false;
+      await saveModelState();
+
+      setTimeout(() => {
+        modelSwitchProgress.value = '';
+      }, 2000);
+    } else {
+      throw new Error(response?.error || '本地模型应用失败');
+    }
+  } catch (error: any) {
+    console.error('本地模型应用失败:', error);
+    modelSwitchProgress.value = `本地模型应用失败: ${error?.message || '未知错误'}`;
+
+    modelInitializationStatus.value = 'error';
+    isModelDownloading.value = false;
+
+    const errorMessage = error?.message || '未知错误';
+    if (
+      errorMessage.includes('network') ||
+      errorMessage.includes('fetch') ||
+      errorMessage.includes('timeout')
+    ) {
+      modelErrorType.value = 'network';
+      modelErrorMessage.value = getMessage('networkErrorMessage');
+    } else if (
+      errorMessage.includes('corrupt') ||
+      errorMessage.includes('invalid') ||
+      errorMessage.includes('format')
+    ) {
+      modelErrorType.value = 'file';
+      modelErrorMessage.value = getMessage('modelCorruptedErrorMessage');
+    } else {
+      modelErrorType.value = 'unknown';
+      modelErrorMessage.value = errorMessage;
+    }
+
+    await saveModelState();
+
+    setTimeout(() => {
+      modelSwitchProgress.value = '';
+    }, 8000);
+  } finally {
+    isModelSwitching.value = false;
+  }
+};
+
+const saveLocalModelPreference = async () => {
+  try {
+    // eslint-disable-next-line no-undef
+    await chrome.storage.local.set({
+      useLocalModel: useLocalModel.value,
+      localModelPath: localModelPath.value,
+      localModelDimension: localModelDimension.value,
+      localModelIdentifier: localModelIdentifier.value,
+    });
+  } catch (error) {
+    console.error('保存本地模型偏好失败:', error);
   }
 };
 
