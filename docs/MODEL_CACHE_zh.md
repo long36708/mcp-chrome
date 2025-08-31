@@ -33,3 +33,5 @@ https://huggingface.co/Xenova/multilingual-e5-base/resolve/main/onnx/model_quant
 4. ONNX 文件名：`model_quantized.onnx` (代码中默认使用的量化版本)
 
 当扩展需要下载这个模型时，它会使用这个 URL 从 Hugging Face 下载模型文件，并将其缓存到浏览器的 Cache Storage 中以供后续使用。
+
+dimension: 768

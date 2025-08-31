@@ -1813,6 +1813,37 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 16px;
 }
+
+.config-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.config-label {
+  min-width: 120px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #64748b;
+}
+
+.config-input {
+  flex: 1;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  padding: 8px 12px;
+  margin-left: 8px;
+  font-size: 14px;
+  background: #f8fafc;
+}
+
+.config-input:focus {
+  outline: none;
+  border-color: #8b5cf6;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+}
 .semantic-engine-card {
   background: white;
   border-radius: 16px;
@@ -1969,6 +2000,29 @@ onUnmounted(() => {
   box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
 }
 
+.file-input-container {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.file-input {
+  flex: 1;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  padding: 8px 12px;
+  font-size: 14px;
+  background: #f8fafc;
+}
+
+.file-input:focus {
+  outline: none;
+  border-color: #8b5cf6;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+}
+
 .connect-button {
   width: 100%;
   display: flex;
@@ -2091,6 +2145,31 @@ onUnmounted(() => {
 }
 
 .danger-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.browse-button {
+  background: #8b5cf6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.browse-button:hover:not(:disabled) {
+  background: #7c3aed;
+  box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.1);
+}
+
+.browse-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
