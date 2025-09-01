@@ -13,13 +13,24 @@ import { ModelCacheManager } from './model-cache-manager';
  * @param {string} modelUrl Stable, permanent URL of the model
  * @returns {Promise<ArrayBuffer>} Model data as ArrayBuffer
  */
-async function getCachedModelData(modelUrl: string): Promise<ArrayBuffer> {
+async function getCachedModelData(
+  modelUrl: string,
+  useLocalFiles: boolean = false,
+): Promise<ArrayBuffer> {
   const cacheManager = ModelCacheManager.getInstance();
 
   // 1. 尝试从缓存获取数据
   const cachedData = await cacheManager.getCachedModelData(modelUrl);
   if (cachedData) {
     return cachedData;
+  }
+
+  // 如果使用本地文件，直接从本地加载，不尝试网络请求
+  if (useLocalFiles) {
+    console.log('Loading model from local files, skipping network fetch...');
+    // 对于本地模型，我们假设它已经在正确的位置
+    // 返回一个空的ArrayBuffer，实际的模型加载将在Worker中处理
+    return new ArrayBuffer(0);
   }
 
   console.log('Model not found in cache or expired. Fetching from network...');
@@ -1366,10 +1377,12 @@ export class SemanticSimilarityEngine {
             );
           }
 
+          // For local files, we don't need to send model data, just the path
           await this._sendMessageToWorker('init', {
             modelPath: onnxModelPathForWorker,
             numThreads: this.config.numThreads,
             executionProviders: this.config.executionProviders,
+            useLocalFiles: true,
           });
         } else {
           // Remote files mode - use cached model data
@@ -1389,7 +1402,7 @@ export class SemanticSimilarityEngine {
           console.log(`SemanticSimilarityEngine: Getting cached model data from ${onnxModelUrl}`);
 
           // Get model data from cache (may download if not cached)
-          const modelData = await getCachedModelData(onnxModelUrl);
+          const modelData = await getCachedModelData(onnxModelUrl, this.config.useLocalFiles);
 
           console.log(
             `SemanticSimilarityEngine: Sending cached model data to worker (${modelData.byteLength} bytes)`,
@@ -1550,10 +1563,12 @@ export class SemanticSimilarityEngine {
       }
 
       reportProgress('downloading', 80, 'Loading local ONNX model...');
+      // For local files, we don't need to send model data, just the path
       await this._sendMessageToWorker('init', {
         modelPath: onnxModelPathForWorker,
         numThreads: this.config.numThreads,
         executionProviders: this.config.executionProviders,
+        useLocalFiles: true,
       });
     } else {
       // Remote files mode - use cached model data
@@ -1573,23 +1588,52 @@ export class SemanticSimilarityEngine {
       reportProgress('downloading', 80, 'Loading cached ONNX model...');
       console.log(`SemanticSimilarityEngine: Getting cached model data from ${onnxModelUrl}`);
 
-      // Get model data from cache (may download if not cached)
-      const modelData = await getCachedModelData(onnxModelUrl);
+      // For local files, we pass the model path directly to the worker
+      if (this.config.useLocalFiles) {
+        let onnxModelPathForWorker: string;
 
-      console.log(
-        `SemanticSimilarityEngine: Sending cached model data to worker (${modelData.byteLength} bytes)`,
-      );
+        if (this.config.localModelPath) {
+          // Use user-specified local model path
+          onnxModelPathForWorker = this.config.localModelPath;
+          console.log(
+            `SemanticSimilarityEngine: Instructing worker to load user-specified local ONNX model from ${onnxModelPathForWorker}`,
+          );
+        } else {
+          // Use default local model path
+          onnxModelPathForWorker = chrome.runtime.getURL(
+            `models/${this.config.modelIdentifier}/${this.config.onnxModelFile}`,
+          );
+          console.log(
+            `SemanticSimilarityEngine: Instructing worker to load default local ONNX model from ${onnxModelPathForWorker}`,
+          );
+        }
 
-      // Send ArrayBuffer to worker with transferable objects for zero-copy
-      await this._sendMessageToWorker(
-        'init',
-        {
-          modelData: modelData,
+        // For local files, we don't need to send model data, just the path
+        await this._sendMessageToWorker('init', {
+          modelPath: onnxModelPathForWorker,
           numThreads: this.config.numThreads,
           executionProviders: this.config.executionProviders,
-        },
-        [modelData],
-      );
+          useLocalFiles: true,
+        });
+      } else {
+        // Get model data from cache (may download if not cached)
+        const modelData = await getCachedModelData(onnxModelUrl, this.config.useLocalFiles);
+
+        console.log(
+          `SemanticSimilarityEngine: Sending cached model data to worker (${modelData.byteLength} bytes)`,
+        );
+
+        // Send ArrayBuffer to worker with transferable objects for zero-copy
+        await this._sendMessageToWorker(
+          'init',
+          {
+            modelData: modelData,
+            numThreads: this.config.numThreads,
+            executionProviders: this.config.executionProviders,
+          },
+          [modelData],
+        );
+      }
     }
     console.log('SemanticSimilarityEngine: Worker reported model initialized.');
 
