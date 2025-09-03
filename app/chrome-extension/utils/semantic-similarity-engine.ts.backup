@@ -16,30 +16,21 @@ import { ModelCacheManager } from './model-cache-manager';
 async function getCachedModelData(
   modelUrl: string,
   useLocalFiles: boolean = false,
-  localModelData?: number[] | ArrayBuffer,
 ): Promise<ArrayBuffer> {
   const cacheManager = ModelCacheManager.getInstance();
-
-  // 如果使用本地文件且提供了模型数据，直接返回
-  if (useLocalFiles && localModelData) {
-    console.log('Loading model from local data...');
-    if (localModelData instanceof ArrayBuffer) {
-      return localModelData;
-    } else {
-      return new Uint8Array(localModelData).buffer;
-    }
-  }
-
-  // 如果使用本地文件但没有数据，抛出错误，不尝试网络下载
-  if (useLocalFiles) {
-    throw new Error('Local model mode enabled but no local model data provided. Network download is disabled in local mode.');
-  }
 
   // 1. 尝试从缓存获取数据
   const cachedData = await cacheManager.getCachedModelData(modelUrl);
   if (cachedData) {
-    console.log('Loading model from cache...');
     return cachedData;
+  }
+
+  // 如果使用本地文件，直接从本地加载，不尝试网络请求
+  if (useLocalFiles) {
+    console.log('Loading model from local files, skipping network fetch...');
+    // 对于本地模型，我们假设它已经在正确的位置
+    // 返回一个空的ArrayBuffer，实际的模型加载将在Worker中处理
+    return new ArrayBuffer(0);
   }
 
   console.log('Model not found in cache or expired. Fetching from network...');
@@ -200,26 +191,9 @@ export const PREDEFINED_MODELS = {
       requiresTokenTypeIds: false, // E5 model doesn't require token_type_ids
     },
   },
-  'local-model': {
-    modelIdentifier: '',
-    dimension: 384,
-    description: 'Local ONNX model file',
-    language: 'custom',
-    performance: 'custom',
-    size: 'Variable',
-    latency: 'Variable',
-    multilingualFeatures: {
-      languageSupport: 'Custom',
-      crossLanguageRetrieval: 'custom',
-      chineseEnglishMixed: 'custom',
-    },
-    modelSpecificConfig: {
-      requiresTokenTypeIds: true, // Default for local models
-    },
-  },
 } as const;
 
-export type ModelPreset = keyof typeof PREDEFINED_MODELS | 'local-model';
+export type ModelPreset = keyof typeof PREDEFINED_MODELS;
 
 /**
  * Get model information
@@ -391,7 +365,6 @@ interface ModelConfig {
   modelIdentifier: string;
   localModelPathPrefix?: string; // Base path for local models (relative to public)
   localModelPath?: string; // User-specified local model path
-  localModelData?: number[]; // Local model data as number array
   onnxModelFile?: string; // ONNX model filename
   maxLength?: number;
   cacheSize?: number;
@@ -412,7 +385,6 @@ interface WorkerMessagePayload {
   modelData?: ArrayBuffer;
   numThreads?: number;
   executionProviders?: string[];
-  useLocalFiles?: boolean;
   input_ids?: number[];
   attention_mask?: number[];
   token_type_ids?: number[];
@@ -913,7 +885,7 @@ export class SemanticSimilarityEngine {
     let modelConfig = { ...options };
     if (options.modelPreset && PREDEFINED_MODELS[options.modelPreset]) {
       const preset = PREDEFINED_MODELS[options.modelPreset];
-      const modelVersion = (options.modelVersion === 'local' ? 'quantized' : options.modelVersion) || 'quantized'; // Default to quantized version, treat 'local' as 'quantized'
+      const modelVersion = options.modelVersion || 'quantized'; // Default to quantized version
       const baseModelIdentifier = preset.modelIdentifier; // Use base identifier without version suffix
       const onnxFileName = getOnnxFileNameForVersion(modelVersion); // Get ONNX filename based on version
 
@@ -945,7 +917,6 @@ export class SemanticSimilarityEngine {
       modelIdentifier: modelConfig.modelIdentifier || 'Xenova/bge-small-en-v1.5',
       localModelPathPrefix: modelConfig.localModelPathPrefix || 'models/',
       localModelPath: modelConfig.localModelPath, // User-specified local model path
-      localModelData: modelConfig.localModelData, // Local model data
       onnxModelFile: modelConfig.onnxModelFile || 'model.onnx',
       maxLength: modelConfig.maxLength || 256,
       cacheSize: modelConfig.cacheSize || 500,
@@ -969,7 +940,7 @@ export class SemanticSimilarityEngine {
           'SemanticSimilarityEngine: DEBUG - modelConfig.useLocalFiles !== undefined:',
           modelConfig.useLocalFiles !== undefined,
         );
-        const result = modelConfig.useLocalFiles !== undefined ? modelConfig.useLocalFiles : false;
+        const result = modelConfig.useLocalFiles !== undefined ? modelConfig.useLocalFiles : true;
         console.log('SemanticSimilarityEngine: DEBUG - final useLocalFiles value:', result);
         return result;
       })(),
@@ -1383,18 +1354,7 @@ export class SemanticSimilarityEngine {
           requiresTokenTypeIds: this.config.requiresTokenTypeIds,
           tokenizerConfig,
         });
-
-        // 在本地模式下，确保tokenizer路径正确
-        if (this.config.useLocalFiles) {
-          // 对于本地文件，使用完整的Chrome扩展URL路径
-          const tokenizerPath = chrome.runtime.getURL(`models/${this.config.modelIdentifier}`);
-          console.log(`SemanticSimilarityEngine: Loading tokenizer from local path: ${tokenizerPath}`);
-          tokenizerConfig.local_files_only = true;
-          tokenizerConfig.cache_dir = false; // 禁用缓存目录
-          this.tokenizer = await AutoTokenizer.from_pretrained(tokenizerPath, tokenizerConfig);
-        } else {
-          this.tokenizer = await AutoTokenizer.from_pretrained(tokenizerIdentifier, tokenizerConfig);
-        }
+        this.tokenizer = await AutoTokenizer.from_pretrained(tokenizerIdentifier, tokenizerConfig);
         console.log('SemanticSimilarityEngine: Tokenizer loaded.');
 
         if (this.config.useLocalFiles) {
@@ -1442,8 +1402,7 @@ export class SemanticSimilarityEngine {
           console.log(`SemanticSimilarityEngine: Getting cached model data from ${onnxModelUrl}`);
 
           // Get model data from cache (may download if not cached)
-          // 确保不在本地模式下调用网络下载
-          const modelData = await getCachedModelData(onnxModelUrl, false, undefined);
+          const modelData = await getCachedModelData(onnxModelUrl, this.config.useLocalFiles);
 
           console.log(
             `SemanticSimilarityEngine: Sending cached model data to worker (${modelData.byteLength} bytes)`,
@@ -1567,29 +1526,17 @@ export class SemanticSimilarityEngine {
     }
 
     try {
-      if (this.config.useLocalFiles) {
-        // 对于本地文件，使用完整的Chrome扩展URL路径
-        const tokenizerPath = chrome.runtime.getURL(`models/${this.config.modelIdentifier}`);
-        console.log(`SemanticSimilarityEngine: Loading tokenizer from local path: ${tokenizerPath}`);
-        tokenizerConfig.local_files_only = true;
-        tokenizerConfig.cache_dir = false; // 禁用缓存目录
-        this.tokenizer = await AutoTokenizer.from_pretrained(tokenizerPath, tokenizerConfig);
-      } else {
-        tokenizerConfig.progress_callback = tokenizerProgressCallback;
-        this.tokenizer = await AutoTokenizer.from_pretrained(tokenizerIdentifier, tokenizerConfig);
-      }
-    } catch (error) {
       if (!this.config.useLocalFiles) {
-        // 如果进度回调不支持，回退到标准方式
-        console.log(
-          'SemanticSimilarityEngine: Progress callback not supported, using standard loading',
-        );
-        delete tokenizerConfig.progress_callback;
-        this.tokenizer = await AutoTokenizer.from_pretrained(tokenizerIdentifier, tokenizerConfig);
-      } else {
-        // 本地模式下的错误直接抛出
-        throw error;
+        tokenizerConfig.progress_callback = tokenizerProgressCallback;
       }
+      this.tokenizer = await AutoTokenizer.from_pretrained(tokenizerIdentifier, tokenizerConfig);
+    } catch (error) {
+      // 如果进度回调不支持，回退到标准方式
+      console.log(
+        'SemanticSimilarityEngine: Progress callback not supported, using standard loading',
+      );
+      delete tokenizerConfig.progress_callback;
+      this.tokenizer = await AutoTokenizer.from_pretrained(tokenizerIdentifier, tokenizerConfig);
     }
 
     reportProgress('downloading', 70, 'Tokenizer loaded, setting up ONNX model...');
@@ -1638,28 +1585,55 @@ export class SemanticSimilarityEngine {
         );
       }
 
-      reportProgress('downloading', 80, 'Downloading ONNX model...');
+      reportProgress('downloading', 80, 'Loading cached ONNX model...');
       console.log(`SemanticSimilarityEngine: Getting cached model data from ${onnxModelUrl}`);
 
-      // Get model data from cache (may download if not cached)
-      // 确保不在本地模式下调用网络下载
-      const modelData = await getCachedModelData(onnxModelUrl, false, undefined);
+      // For local files, we pass the model path directly to the worker
+      if (this.config.useLocalFiles) {
+        let onnxModelPathForWorker: string;
 
-      reportProgress('downloading', 90, 'Sending model to worker...');
-      console.log(
-        `SemanticSimilarityEngine: Sending cached model data to worker (${modelData.byteLength} bytes)`,
-      );
+        if (this.config.localModelPath) {
+          // Use user-specified local model path
+          onnxModelPathForWorker = this.config.localModelPath;
+          console.log(
+            `SemanticSimilarityEngine: Instructing worker to load user-specified local ONNX model from ${onnxModelPathForWorker}`,
+          );
+        } else {
+          // Use default local model path
+          onnxModelPathForWorker = chrome.runtime.getURL(
+            `models/${this.config.modelIdentifier}/${this.config.onnxModelFile}`,
+          );
+          console.log(
+            `SemanticSimilarityEngine: Instructing worker to load default local ONNX model from ${onnxModelPathForWorker}`,
+          );
+        }
 
-      // Send ArrayBuffer to worker with transferable objects for zero-copy
-      await this._sendMessageToWorker(
-        'init',
-        {
-          modelData: modelData,
+        // For local files, we don't need to send model data, just the path
+        await this._sendMessageToWorker('init', {
+          modelPath: onnxModelPathForWorker,
           numThreads: this.config.numThreads,
           executionProviders: this.config.executionProviders,
-        },
-        [modelData],
-      );
+          useLocalFiles: true,
+        });
+      } else {
+        // Get model data from cache (may download if not cached)
+        const modelData = await getCachedModelData(onnxModelUrl, this.config.useLocalFiles);
+
+        console.log(
+          `SemanticSimilarityEngine: Sending cached model data to worker (${modelData.byteLength} bytes)`,
+        );
+
+        // Send ArrayBuffer to worker with transferable objects for zero-copy
+        await this._sendMessageToWorker(
+          'init',
+          {
+            modelData: modelData,
+            numThreads: this.config.numThreads,
+            executionProviders: this.config.executionProviders,
+          },
+          [modelData],
+        );
+      }
     }
     console.log('SemanticSimilarityEngine: Worker reported model initialized.');
 
@@ -2480,167 +2454,5 @@ export class SemanticSimilarityEngine {
     this.initPromise = null;
     this.useSIMD = false;
     console.log('SemanticSimilarityEngine: Disposed.');
-  }
-}
-
-/**
- * Model source information interface
- */
-export interface ModelSourceInfo {
-  source: 'local-file' | 'cached' | 'downloading' | 'unknown';
-  details: {
-    filePath?: string;
-    fileName?: string;
-    cacheTimestamp?: number;
-    downloadUrl?: string;
-    fileSize?: number;
-    storageType?: 'indexeddb' | 'chrome-storage';
-    isExpired?: boolean;
-  };
-}
-
-/**
- * Get detailed information about the current model source
- */
-export async function getModelSourceInfo(modelPreset?: ModelPreset): Promise<ModelSourceInfo> {
-  try {
-    // Check if using local model
-    const result = await chrome.storage.local.get([
-      'useLocalModel',
-      'localModelPath',
-      'localModelFileName',
-      'localModelSize',
-      'localModelStorageType',
-      'selectedModel'
-    ]);
-
-    // If local model is enabled and has data
-    if (result.useLocalModel && result.localModelPath) {
-      return {
-        source: 'local-file',
-        details: {
-          filePath: result.localModelPath,
-          fileName: result.localModelFileName,
-          fileSize: result.localModelSize,
-          storageType: result.localModelStorageType || 'chrome-storage'
-        }
-      };
-    }
-
-    // Check for cached model
-    const currentModel = modelPreset || result.selectedModel || 'multilingual-e5-small';
-    const modelInfo = PREDEFINED_MODELS[currentModel as ModelPreset];
-    
-    if (modelInfo && modelInfo.modelIdentifier) {
-      const modelIdentifier = modelInfo.modelIdentifier;
-      const onnxModelFile = 'model.onnx';
-      const modelIdParts = modelIdentifier.split('/');
-      const modelNameForUrl = modelIdParts.length > 1 ? modelIdentifier : `Xenova/${modelIdentifier}`;
-      const onnxModelUrl = `https://huggingface.co/${modelNameForUrl}/resolve/main/onnx/${onnxModelFile}`;
-
-      const cacheManager = ModelCacheManager.getInstance();
-      const isCached = await cacheManager.isModelCached(onnxModelUrl);
-      
-      if (isCached) {
-        // Get cache details
-        const cacheStats = await cacheManager.getCacheStats();
-        const cacheEntry = cacheStats.entries.find(entry => entry.url === onnxModelUrl);
-        
-        return {
-          source: 'cached',
-          details: {
-            downloadUrl: onnxModelUrl,
-            cacheTimestamp: cacheEntry?.timestamp,
-            fileSize: cacheEntry?.size,
-            isExpired: cacheEntry?.expired || false
-          }
-        };
-      }
-    }
-
-    // Check if currently downloading
-    const modelState = await chrome.storage.local.get(['modelState']);
-    if (modelState.modelState?.isDownloading) {
-      return {
-        source: 'downloading',
-        details: {
-          downloadUrl: modelInfo?.modelIdentifier ? 
-            `https://huggingface.co/${modelInfo.modelIdentifier}/resolve/main/onnx/model.onnx` : undefined
-        }
-      };
-    }
-
-    return {
-      source: 'unknown',
-      details: {}
-    };
-  } catch (error) {
-    console.error('Error getting model source info:', error);
-    return {
-      source: 'unknown',
-      details: {}
-    };
-  }
-}
-
-/**
- * Check if current model is from local file
- */
-export async function isUsingLocalModel(): Promise<boolean> {
-  try {
-    const result = await chrome.storage.local.get(['useLocalModel', 'localModelPath']);
-    return result.useLocalModel && !!result.localModelPath;
-  } catch (error) {
-    console.error('Error checking local model usage:', error);
-    return false;
-  }
-}
-
-/**
- * Get storage location description
- */
-export function getStorageLocationText(sourceInfo: ModelSourceInfo): string {
-  switch (sourceInfo.source) {
-    case 'local-file':
-      return sourceInfo.details.storageType === 'indexeddb' ? 'IndexedDB' : 'Chrome存储';
-    case 'cached':
-      return 'Cache API';
-    case 'downloading':
-      return '下载中...';
-    default:
-      return '未知';
-  }
-}
-
-/**
- * Format file size for display
- */
-export function formatFileSize(bytes?: number): string {
-  if (!bytes) return '未知大小';
-  
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${sizes[i]}`;
-}
-
-/**
- * Format cache time for display
- */
-export function formatCacheTime(timestamp?: number): string {
-  if (!timestamp) return '未知时间';
-  
-  const date = new Date(timestamp);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-  
-  if (diffDays === 0) {
-    return '今天';
-  } else if (diffDays === 1) {
-    return '昨天';
-  } else if (diffDays < 7) {
-    return `${diffDays}天前`;
-  } else {
-    return date.toLocaleDateString();
   }
 }

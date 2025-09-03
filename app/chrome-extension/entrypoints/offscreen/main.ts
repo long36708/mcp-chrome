@@ -182,6 +182,7 @@ async function handleSimilarityEngineInit(config: any): Promise<void> {
   console.log('Offscreen: Config modelVersion:', config.modelVersion);
   console.log('Offscreen: Config modelDimension:', config.modelDimension);
   console.log('Offscreen: Config modelIdentifier:', config.modelIdentifier);
+  console.log('Offscreen: Config localModelData:', config.localModelData ? `${config.localModelData.length} bytes` : 'none');
 
   // Check if reinitialization is needed
   const needsReinit = needsReinitialization(config);

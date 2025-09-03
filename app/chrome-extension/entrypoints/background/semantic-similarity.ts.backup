@@ -144,19 +144,19 @@ export async function handleModelSwitch(
   modelDimension?: number,
   previousDimension?: number,
   useLocalModel?: boolean,
-  localModelData?: number[] | ArrayBuffer,
+  localModelPath?: string,
   localModelIdentifier?: string,
 ): Promise<{ success: boolean; error?: string }> {
   try {
     // Check if we're switching to a local model
-    const isSwitchingToLocalModel = useLocalModel && localModelData;
+    const isSwitchingToLocalModel = useLocalModel && localModelPath;
 
-    // For local models, we need to check if the model has changed
+    // For local models, we need to check if the path has changed
     if (isSwitchingToLocalModel) {
       const needsSwitch =
         !currentBackgroundModelConfig ||
         currentBackgroundModelConfig.modelPreset !== 'local-model' ||
-        !localModelData;
+        (currentBackgroundModelConfig as any).localModelPath !== localModelPath;
 
       if (!needsSwitch) {
         await updateModelStatus('ready', 100);
@@ -189,7 +189,7 @@ export async function handleModelSwitch(
     if (isSwitchingToLocalModel) {
       // Configure for local model
       config.modelPreset = 'local-model';
-      config.localModelData = localModelData;
+      config.localModelPath = localModelPath;
       config.modelIdentifier = localModelIdentifier || 'local-model';
       config.modelDimension = modelDimension || 384;
       // For local models, we don't use modelVersion in the same way
@@ -209,12 +209,12 @@ export async function handleModelSwitch(
     if (response && response.success) {
       currentBackgroundModelConfig = {
         modelPreset: isSwitchingToLocalModel ? 'local-model' : modelPreset,
-        modelVersion: isSwitchingToLocalModel ? 'quantized' : modelVersion,
+        modelVersion: isSwitchingToLocalModel ? 'local' : modelVersion,
         modelDimension: modelDimension || (isSwitchingToLocalModel ? 384 : 0),
         // Add local model specific properties
         ...(isSwitchingToLocalModel
           ? {
-              localModelData: localModelData,
+              localModelPath: localModelPath,
               modelIdentifier: localModelIdentifier || 'local-model',
             }
           : {}),
@@ -392,11 +392,11 @@ export const initSemanticSimilarityListener = () => {
       if (message.useLocalModel) {
         handleModelSwitch(
           'local-model', // modelPreset
-          'quantized', // modelVersion (use quantized as default for local models)
+          'local', // modelVersion
           message.modelDimension,
           message.previousDimension,
           true, // useLocalModel
-          message.modelData, // localModelData
+          message.modelPath, // localModelPath
           message.modelIdentifier, // localModelIdentifier
         )
           .then((result: { success: boolean; error?: string }) => sendResponse(result))
